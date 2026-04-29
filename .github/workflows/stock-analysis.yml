@@ -1,0 +1,67 @@
+name: Weekly Portfolio Analysis
+
+on:
+  schedule:
+    # Runs every Monday at 07:00 UTC (before markets open in Europe).
+    - cron: "0 7 * * 1"
+  workflow_dispatch:
+    inputs:
+      run_immediately:
+        description: "Run the portfolio analysis immediately (one-shot mode)"
+        required: false
+        default: "true"
+
+jobs:
+  run-portfolio-analysis:
+    name: Run Portfolio Analysis
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.x"
+
+      - name: Restore dependencies
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build --no-restore --configuration Release
+
+      - name: Load portfolio prompt from file
+        run: |
+          {
+            echo "PORTFOLIO_PROMPT<<PROMPT_EOF"
+            cat prompts/stock-portfolio-prompt.md
+            echo "PROMPT_EOF"
+          } >> "$GITHUB_ENV"
+
+      - name: Run portfolio analysis (one-shot)
+        env:
+          # GitHub Copilot token
+          CopilotDigest__Copilot__Token: ${{ secrets.COPILOT_TOKEN }}
+          # Model — gpt-4.1 has strong reasoning for financial analysis
+          CopilotDigest__Copilot__Model: ${{ vars.COPILOT_MODEL || 'gpt-4.1' }}
+          # Higher token limit for detailed per-position breakdowns
+          CopilotDigest__Copilot__MaxTokens: ${{ vars.COPILOT_MAX_TOKENS || '4000' }}
+          # Email / SMTP notification settings
+          CopilotDigest__Email__SmtpHost: ${{ secrets.SMTP_HOST }}
+          CopilotDigest__Email__SmtpPort: ${{ vars.SMTP_PORT || '587' }}
+          CopilotDigest__Email__Username: ${{ secrets.SMTP_USERNAME }}
+          CopilotDigest__Email__Password: ${{ secrets.SMTP_PASSWORD }}
+          CopilotDigest__Email__FromAddress: ${{ secrets.EMAIL_FROM_ADDRESS }}
+          CopilotDigest__Email__ToAddress: ${{ secrets.EMAIL_TO_ADDRESS }}
+          # Single topic: the full portfolio analysis prompt
+          CopilotDigest__Topics__0__Name: "Portfolio Analysis"
+          CopilotDigest__Topics__0__Prompt: ${{ env.PORTFOLIO_PROMPT }}
+        run: |
+          dotnet run \
+            --project src/CopilotDigest/CopilotDigest.csproj \
+            --configuration Release \
+            --no-build \
+            -- --run-once
