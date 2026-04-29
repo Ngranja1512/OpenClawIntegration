@@ -16,7 +16,7 @@ public class CopilotSettings
     public string ApiUrl { get; set; } = "https://models.inference.ai.azure.com";
 
     /// <summary>Copilot model to use for summarisation.</summary>
-    public string Model { get; set; } = "gpt-4o";
+    public string Model { get; set; } = "gpt-4.1";
 
     /// <summary>Maximum tokens in each summary response.</summary>
     public int MaxTokens { get; set; } = 1000;
