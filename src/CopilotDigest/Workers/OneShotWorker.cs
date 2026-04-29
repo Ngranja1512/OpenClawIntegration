@@ -1,6 +1,6 @@
-using OpenClawIntegration.Services;
+using CopilotDigest.Services;
 
-namespace OpenClawIntegration.Workers;
+namespace CopilotDigest.Workers;
 
 /// <summary>
 /// Runs a single summary cycle immediately and then requests host shutdown.

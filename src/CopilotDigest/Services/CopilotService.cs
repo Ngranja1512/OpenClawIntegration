@@ -2,9 +2,9 @@ using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Options;
-using OpenClawIntegration.Models;
+using CopilotDigest.Models;
 
-namespace OpenClawIntegration.Services;
+namespace CopilotDigest.Services;
 
 /// <summary>
 /// Calls the GitHub Copilot chat-completions endpoint

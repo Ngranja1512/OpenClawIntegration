@@ -1,9 +1,9 @@
 using System.Net;
 using System.Net.Mail;
 using Microsoft.Extensions.Options;
-using OpenClawIntegration.Models;
+using CopilotDigest.Models;
 
-namespace OpenClawIntegration.Services;
+namespace CopilotDigest.Services;
 
 /// <summary>
 /// Sends topic summaries to a configured e-mail address via SMTP.

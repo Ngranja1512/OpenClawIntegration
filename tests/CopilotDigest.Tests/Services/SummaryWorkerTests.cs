@@ -1,11 +1,11 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
-using OpenClawIntegration.Models;
-using OpenClawIntegration.Services;
-using OpenClawIntegration.Workers;
+using CopilotDigest.Models;
+using CopilotDigest.Services;
+using CopilotDigest.Workers;
 using Moq;
 
-namespace OpenClawIntegration.Tests.Services;
+namespace CopilotDigest.Tests.Services;
 
 public class SummaryWorkerTests
 {

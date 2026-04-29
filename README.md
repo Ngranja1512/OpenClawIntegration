@@ -1,4 +1,4 @@
-# OpenClawIntegration
+# CopilotDigest
 
 A .NET 10 Worker Service that uses **GitHub Copilot** to research and summarise topics on a daily schedule, then delivers the results to your **email inbox**.
 
@@ -50,14 +50,14 @@ A .NET 10 Worker Service that uses **GitHub Copilot** to research and summarise 
 Copy the example config and fill in your credentials:
 
 ```bash
-cp src/OpenClawIntegration/appsettings.example.json src/OpenClawIntegration/appsettings.json
+cp src/CopilotDigest/appsettings.example.json src/CopilotDigest/appsettings.json
 ```
 
 Edit `appsettings.json`:
 
 ```json
 {
-  "OpenClawIntegration": {
+  "CopilotDigest": {
     "Copilot": {
       "Token": "ghp_YOUR_GITHUB_TOKEN",
       "Model": "gpt-4o"
@@ -93,12 +93,12 @@ Edit `appsettings.json`:
 
 **Daemon mode** (waits for the next cron tick, then repeats):
 ```bash
-dotnet run --project src/OpenClawIntegration
+dotnet run --project src/CopilotDigest
 ```
 
 **One-shot mode** (runs once immediately, then exits):
 ```bash
-dotnet run --project src/OpenClawIntegration -- --run-once
+dotnet run --project src/CopilotDigest -- --run-once
 ```
 
 ## GitHub Actions scheduling
@@ -142,7 +142,7 @@ Go to **Actions → Daily Summary → Run workflow** to trigger immediately.
 
 ## Configuration reference
 
-All settings live under the `OpenClawIntegration` key and can be overridden by environment variables using the standard .NET double-underscore separator convention (e.g. `OpenClawIntegration__Copilot__Token`).
+All settings live under the `CopilotDigest` key and can be overridden by environment variables using the standard .NET double-underscore separator convention (e.g. `CopilotDigest__Copilot__Token`).
 
 ### `Copilot`
 
@@ -182,8 +182,8 @@ Array of topic objects:
 ## Project structure
 
 ```
-OpenClawIntegration/
-├── src/OpenClawIntegration/
+CopilotDigest/
+├── src/CopilotDigest/
 │   ├── Models/
 │   │   ├── AppSettings.cs        # Configuration models
 │   │   ├── ApiModels.cs          # Copilot API DTOs
@@ -199,7 +199,7 @@ OpenClawIntegration/
 │   ├── Program.cs
 │   ├── appsettings.json          # Config (gitignored – no secrets here)
 │   └── appsettings.example.json  # Example config template
-├── tests/OpenClawIntegration.Tests/
+├── tests/CopilotDigest.Tests/
 │   └── Services/
 │       ├── CopilotServiceTests.cs
 │       ├── ResearchServiceTests.cs
@@ -207,7 +207,7 @@ OpenClawIntegration/
 ├── .github/workflows/
 │   ├── scheduled-summary.yml     # Daily cron + manual trigger
 │   └── ci.yml                    # Build & test on push/PR
-└── OpenClawIntegration.slnx
+└── CopilotDigest.slnx
 ```
 
 ## Running tests

@@ -1,4 +1,4 @@
-namespace OpenClawIntegration.Models;
+namespace CopilotDigest.Models;
 
 public class Topic
 {

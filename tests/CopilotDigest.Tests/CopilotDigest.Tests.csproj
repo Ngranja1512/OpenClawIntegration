@@ -21,7 +21,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\OpenClawIntegration\OpenClawIntegration.csproj" />
+    <ProjectReference Include="..\..\src\CopilotDigest\CopilotDigest.csproj" />
   </ItemGroup>
 
 </Project>

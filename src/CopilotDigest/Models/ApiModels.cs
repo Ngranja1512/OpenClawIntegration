@@ -1,6 +1,6 @@
 using System.Text.Json.Serialization;
 
-namespace OpenClawIntegration.Models;
+namespace CopilotDigest.Models;
 
 // ── GitHub Copilot chat-completions API ──────────────────────────────────────
 

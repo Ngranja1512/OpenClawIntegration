@@ -1,6 +1,6 @@
-using OpenClawIntegration.Models;
+using CopilotDigest.Models;
 
-namespace OpenClawIntegration.Services;
+namespace CopilotDigest.Services;
 
 /// <summary>
 /// Generates an AI-powered summary for a given topic using the

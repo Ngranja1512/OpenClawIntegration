@@ -1,9 +1,9 @@
 using Cronos;
 using Microsoft.Extensions.Options;
-using OpenClawIntegration.Models;
-using OpenClawIntegration.Services;
+using CopilotDigest.Models;
+using CopilotDigest.Services;
 
-namespace OpenClawIntegration.Workers;
+namespace CopilotDigest.Workers;
 
 /// <summary>
 /// Background worker that runs on a configurable cron schedule.

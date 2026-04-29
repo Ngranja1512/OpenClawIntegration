@@ -1,6 +1,6 @@
-using OpenClawIntegration.Models;
+using CopilotDigest.Models;
 
-namespace OpenClawIntegration.Services;
+namespace CopilotDigest.Services;
 
 /// <summary>
 /// Orchestrates topic research by calling the GitHub Copilot API

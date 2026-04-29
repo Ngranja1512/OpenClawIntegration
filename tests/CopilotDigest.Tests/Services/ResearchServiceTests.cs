@@ -1,9 +1,9 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
-using OpenClawIntegration.Models;
-using OpenClawIntegration.Services;
+using CopilotDigest.Models;
+using CopilotDigest.Services;
 
-namespace OpenClawIntegration.Tests.Services;
+namespace CopilotDigest.Tests.Services;
 
 public class ResearchServiceTests
 {
