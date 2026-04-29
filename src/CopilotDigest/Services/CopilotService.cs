@@ -83,6 +83,18 @@ public class CopilotService : ICopilotService
         return summary;
     }
 
+    public async Task<IReadOnlyList<string>> GetAvailableModelsAsync(CancellationToken cancellationToken = default)
+    {
+        using var response = await _http.GetAsync("models", cancellationToken);
+        response.EnsureSuccessStatusCode();
+
+        var json = await response.Content.ReadAsStringAsync(cancellationToken);
+        var modelsResponse = JsonSerializer.Deserialize<CopilotModelsResponse>(json, JsonOptions);
+
+        return modelsResponse?.Data.Select(m => m.Id).OrderBy(id => id).ToList()
+               ?? [];
+    }
+
     private static string BuildPrompt(Topic topic)
     {
         if (!string.IsNullOrWhiteSpace(topic.Prompt))

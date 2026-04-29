@@ -3,6 +3,7 @@ using CopilotDigest.Services;
 using CopilotDigest.Workers;
 
 var runOnce = args.Contains("--run-once");
+var listModels = args.Contains("--list-models");
 
 var builder = Host.CreateApplicationBuilder(args);
 
@@ -30,4 +31,15 @@ else
 }
 
 var host = builder.Build();
+if (listModels)
+{
+    // One-shot mode: list available models for the configured API endpoint and exit.
+    var copilot = host.Services.GetRequiredService<ICopilotService>();
+    var models = await copilot.GetAvailableModelsAsync();
+    Console.WriteLine($"Available models at configured ApiUrl:");
+    foreach (var id in models)
+        Console.WriteLine($"  {id}");
+    return;
+}
+
 host.Run();

@@ -26,7 +26,7 @@ public class CopilotSettings
     ///   <item>GitHub Copilot Pro: <c>https://api.githubcopilot.com</c></item>
     /// </list>
     /// </summary>
-    public string ApiUrl { get; set; } = "https://models.inference.ai.azure.com";
+    public string ApiUrl { get; set; } = "https://api.githubcopilot.com";
 
     /// <summary>Copilot model to use for summarisation.</summary>
     public string Model { get; set; } = "gpt-4o";

@@ -36,3 +36,15 @@ public class CopilotChoice
     [JsonPropertyName("message")]
     public CopilotMessage Message { get; set; } = new();
 }
+
+public class CopilotModelsResponse
+{
+    [JsonPropertyName("data")]
+    public List<CopilotModel> Data { get; set; } = [];
+}
+
+public class CopilotModel
+{
+    [JsonPropertyName("id")]
+    public string Id { get; set; } = string.Empty;
+}
