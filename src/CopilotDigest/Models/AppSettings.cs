@@ -10,24 +10,11 @@ public class AppSettings
 
 public class CopilotSettings
 {
-    /// <summary>
-    /// GitHub token used to authenticate with the AI API.
-    /// <list type="bullet">
-    ///   <item>GitHub Models (free): a PAT with <c>models: read</c> permission.</item>
-    ///   <item>GitHub Copilot Pro: a classic PAT or OAuth token with <c>copilot</c> scope.
-    ///   The app will automatically exchange it for a short-lived Copilot API token.</item>
-    /// </list>
-    /// </summary>
+    /// <summary>GitHub fine-grained PAT with <c>models: read</c> permission.</summary>
     public string Token { get; set; } = string.Empty;
 
-    /// <summary>
-    /// Base URL of the chat-completions API.
-    /// <list type="bullet">
-    ///   <item>GitHub Models (free tier): <c>https://models.inference.ai.azure.com</c></item>
-    ///   <item>GitHub Copilot Pro: <c>https://api.githubcopilot.com</c></item>
-    /// </list>
-    /// </summary>
-    public string ApiUrl { get; set; } = "https://api.githubcopilot.com";
+    /// <summary>Base URL of the chat-completions API.</summary>
+    public string ApiUrl { get; set; } = "https://models.inference.ai.azure.com";
 
     /// <summary>Copilot model to use for summarisation.</summary>
     public string Model { get; set; } = "gpt-4o";
