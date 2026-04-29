@@ -18,9 +18,17 @@ public class CopilotService : ICopilotService
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
     };
 
+    private static readonly Uri CopilotTokenExchangeUri =
+        new("https://api.github.com/copilot_internal/v2/token");
+
     private readonly HttpClient _http;
     private readonly CopilotSettings _settings;
     private readonly ILogger<CopilotService> _logger;
+    private readonly bool _usesCopilotProEndpoint;
+
+    // Short-lived Copilot API token obtained via token exchange
+    private string? _copilotApiToken;
+    private DateTimeOffset _copilotApiTokenExpiry = DateTimeOffset.MinValue;
 
     public CopilotService(
         HttpClient http,
@@ -32,9 +40,54 @@ public class CopilotService : ICopilotService
         _logger = logger;
 
         _http.BaseAddress = new Uri(_settings.ApiUrl.TrimEnd('/') + "/");
+        // GitHub token used as-is for GitHub Models, and for the token-exchange
+        // request when targeting the Copilot Pro endpoint.
         _http.DefaultRequestHeaders.Authorization =
             new AuthenticationHeaderValue("Bearer", _settings.Token);
         _http.DefaultRequestHeaders.Add("Copilot-Integration-Id", "copilot-daily-digest");
+        _http.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", "CopilotDigest/1.0");
+
+        _usesCopilotProEndpoint = _settings.ApiUrl
+            .Contains("api.githubcopilot.com", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Returns the bearer token to use for API calls.
+    /// For the Copilot Pro endpoint, exchanges the GitHub token for a
+    /// short-lived Copilot API token (~30 min) and caches it until near-expiry.
+    /// </summary>
+    private async Task<string> GetAuthTokenAsync(CancellationToken ct)
+    {
+        if (!_usesCopilotProEndpoint)
+            return _settings.Token;
+
+        if (_copilotApiToken is not null && DateTimeOffset.UtcNow < _copilotApiTokenExpiry.AddMinutes(-5))
+            return _copilotApiToken;
+
+        _logger.LogDebug("Exchanging GitHub token for Copilot API token");
+
+        // The DefaultRequestHeaders.Authorization already carries the GitHub token,
+        // which is what this exchange endpoint requires.
+        using var exchangeRequest = new HttpRequestMessage(HttpMethod.Get, CopilotTokenExchangeUri);
+        using var exchangeResponse = await _http.SendAsync(exchangeRequest, ct);
+
+        if (!exchangeResponse.IsSuccessStatusCode)
+        {
+            var body = await exchangeResponse.Content.ReadAsStringAsync(ct);
+            _logger.LogError("Token exchange failed ({Status}): {Body}",
+                (int)exchangeResponse.StatusCode, body);
+        }
+
+        exchangeResponse.EnsureSuccessStatusCode();
+
+        var exchangeJson = await exchangeResponse.Content.ReadAsStringAsync(ct);
+        var tokenData = JsonSerializer.Deserialize<CopilotTokenResponse>(exchangeJson, JsonOptions);
+
+        _copilotApiToken = tokenData!.Token;
+        _copilotApiTokenExpiry = tokenData.ExpiresAt;
+        _logger.LogDebug("Copilot API token obtained, expires at {Expiry}", _copilotApiTokenExpiry);
+
+        return _copilotApiToken;
     }
 
     public async Task<string> SummariseTopicAsync(Topic topic, CancellationToken cancellationToken = default)
@@ -58,11 +111,15 @@ public class CopilotService : ICopilotService
         };
 
         var json = JsonSerializer.Serialize(request, JsonOptions);
-        using var content = new StringContent(json, Encoding.UTF8, "application/json");
 
         _logger.LogInformation("Requesting Copilot summary for topic: {Topic}", topic.Name);
 
-        using var response = await _http.PostAsync("chat/completions", content, cancellationToken);
+        var authToken = await GetAuthTokenAsync(cancellationToken);
+        using var httpRequest = new HttpRequestMessage(HttpMethod.Post, "chat/completions");
+        httpRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", authToken);
+        httpRequest.Content = new StringContent(json, Encoding.UTF8, "application/json");
+
+        using var response = await _http.SendAsync(httpRequest, cancellationToken);
         if (!response.IsSuccessStatusCode)
         {
             var errorBody = await response.Content.ReadAsStringAsync(cancellationToken);
@@ -85,7 +142,10 @@ public class CopilotService : ICopilotService
 
     public async Task<IReadOnlyList<string>> GetAvailableModelsAsync(CancellationToken cancellationToken = default)
     {
-        using var response = await _http.GetAsync("models", cancellationToken);
+        var authToken = await GetAuthTokenAsync(cancellationToken);
+        using var httpRequest = new HttpRequestMessage(HttpMethod.Get, "models");
+        httpRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", authToken);
+        using var response = await _http.SendAsync(httpRequest, cancellationToken);
         response.EnsureSuccessStatusCode();
 
         var json = await response.Content.ReadAsStringAsync(cancellationToken);

@@ -14,7 +14,8 @@ public class CopilotSettings
     /// GitHub token used to authenticate with the AI API.
     /// <list type="bullet">
     ///   <item>GitHub Models (free): a PAT with <c>models: read</c> permission.</item>
-    ///   <item>GitHub Copilot Pro: a PAT or OAuth token with Copilot access (requires an active Copilot Pro subscription).</item>
+    ///   <item>GitHub Copilot Pro: a classic PAT or OAuth token with <c>copilot</c> scope.
+    ///   The app will automatically exchange it for a short-lived Copilot API token.</item>
     /// </list>
     /// </summary>
     public string Token { get; set; } = string.Empty;

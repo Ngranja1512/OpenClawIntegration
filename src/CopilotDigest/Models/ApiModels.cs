@@ -48,3 +48,14 @@ public class CopilotModel
     [JsonPropertyName("id")]
     public string Id { get; set; } = string.Empty;
 }
+
+// ── GitHub token exchange (Copilot Pro endpoint only) ────────────────────────
+
+public class CopilotTokenResponse
+{
+    [JsonPropertyName("token")]
+    public string Token { get; set; } = string.Empty;
+
+    [JsonPropertyName("expires_at")]
+    public DateTimeOffset ExpiresAt { get; set; }
+}
