@@ -13,7 +13,7 @@ public class CopilotSettings
     /// <summary>GitHub personal access token with <c>models: read</c> permission.</summary>
     public string Token { get; set; } = string.Empty;
 
-    public string ApiUrl { get; set; } = "https://models.inference.ai.azure.com";
+    public string ApiUrl { get; set; } = "https://api.githubcopilot.com";
 
     /// <summary>Copilot model to use for summarisation.</summary>
     public string Model { get; set; } = "gpt-4.1";
