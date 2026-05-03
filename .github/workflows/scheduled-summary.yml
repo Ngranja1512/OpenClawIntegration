@@ -1,9 +1,6 @@
 name: Daily Summary
 
 on:
-  schedule:
-    # Runs every day at 08:00 UTC. Adjust the cron expression as needed.
-    - cron: "0 8 * * *"
   workflow_dispatch:
     inputs:
       run_immediately:
