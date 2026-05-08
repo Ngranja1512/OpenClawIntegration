@@ -117,6 +117,9 @@ jobs:
           CopilotDigest__Email__ToAddress: ${{ secrets.EMAIL_TO_ADDRESS }}
           # Single topic: the full portfolio analysis prompt
           CopilotDigest__Topics__0__Name: "Portfolio Analysis"
+          # Limit news headlines to keep the enriched prompt within the API's request size limit
+          CopilotDigest__News__MaxItemsPerFeed: ${{ vars.NEWS_MAX_ITEMS_PER_FEED || '2' }}
+          CopilotDigest__News__MaxItemsPerStockFeed: ${{ vars.NEWS_MAX_ITEMS_PER_STOCK_FEED || '1' }}
         run: |
           export CopilotDigest__Topics__0__Prompt="$PORTFOLIO_PROMPT"
           dotnet run \
