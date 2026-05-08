@@ -89,6 +89,7 @@ jobs:
           echo
 
       - name: Run portfolio analysis (one-shot)
+        if: ${{ false }}
         env:
           # GitHub Copilot token
           CopilotDigest__Copilot__Token: ${{ secrets.COPILOT_TOKEN }}
