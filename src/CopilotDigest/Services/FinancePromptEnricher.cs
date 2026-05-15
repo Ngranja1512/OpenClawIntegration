@@ -14,11 +14,13 @@ public class FinancePromptEnricher : IFinancePromptEnricher
     private readonly IFreeMarketDataService _marketDataService;
     private readonly IMarketNewsService _newsService;
     private readonly IInsiderDataService _insiderDataService;
+    private readonly IFinancialDataService _financialDataService;
     private readonly ILogger<FinancePromptEnricher> _logger;
 
     public FinancePromptEnricher()
         : this(new EmptyMarketDataService(), new EmptyNewsService(),
-               new EmptyInsiderDataService(), NullLogger<FinancePromptEnricher>.Instance)
+               new EmptyInsiderDataService(), new EmptyFinancialDataService(),
+               NullLogger<FinancePromptEnricher>.Instance)
     {
     }
 
@@ -27,7 +29,7 @@ public class FinancePromptEnricher : IFinancePromptEnricher
         IFreeMarketDataService marketDataService,
         ILogger<FinancePromptEnricher> logger)
         : this(marketDataService, new EmptyNewsService(),
-               new EmptyInsiderDataService(), logger)
+               new EmptyInsiderDataService(), new EmptyFinancialDataService(), logger)
     {
     }
 
@@ -36,7 +38,7 @@ public class FinancePromptEnricher : IFinancePromptEnricher
         IMarketNewsService newsService,
         ILogger<FinancePromptEnricher> logger)
         : this(marketDataService, newsService,
-               new EmptyInsiderDataService(), logger)
+               new EmptyInsiderDataService(), new EmptyFinancialDataService(), logger)
     {
     }
 
@@ -45,11 +47,23 @@ public class FinancePromptEnricher : IFinancePromptEnricher
         IMarketNewsService newsService,
         IInsiderDataService insiderDataService,
         ILogger<FinancePromptEnricher> logger)
+        : this(marketDataService, newsService, insiderDataService,
+               new EmptyFinancialDataService(), logger)
     {
-        _marketDataService  = marketDataService;
-        _newsService        = newsService;
-        _insiderDataService = insiderDataService;
-        _logger             = logger;
+    }
+
+    public FinancePromptEnricher(
+        IFreeMarketDataService marketDataService,
+        IMarketNewsService newsService,
+        IInsiderDataService insiderDataService,
+        IFinancialDataService financialDataService,
+        ILogger<FinancePromptEnricher> logger)
+    {
+        _marketDataService    = marketDataService;
+        _newsService          = newsService;
+        _insiderDataService   = insiderDataService;
+        _financialDataService = financialDataService;
+        _logger               = logger;
     }
 
     public async Task<Topic> EnrichTopicAsync(Topic topic, CancellationToken cancellationToken = default)
@@ -126,7 +140,42 @@ public class FinancePromptEnricher : IFinancePromptEnricher
             }
         }
 
-        if (snapshots.Count == 0 && newsItems.Count == 0 && insiderTrades.Count == 0)
+        // Fetch financial fundamentals — only when the topic is a focused single-stock deep-dive
+        // (holdings.Count <= MaxHoldingsForEnrichment) to avoid calling Yahoo for 29-stock portfolios.
+        var financialSnapshots = new Dictionary<string, FinancialSnapshot>(StringComparer.OrdinalIgnoreCase);
+
+        if (_financialDataService is not EmptyFinancialDataService)
+        {
+            foreach (var holding in holdings)
+            {
+                if (!IsDirectStock(holding.Type))
+                {
+                    continue;
+                }
+
+                cancellationToken.ThrowIfCancellationRequested();
+
+                var yahooSymbol = snapshotByTicker.TryGetValue(holding.Ticker, out var snap2) &&
+                                  !string.IsNullOrWhiteSpace(snap2.ProviderSymbol)
+                    ? snap2.ProviderSymbol
+                    : holding.Ticker;
+
+                try
+                {
+                    var fs = await _financialDataService.GetFinancialSnapshotAsync(yahooSymbol, cancellationToken);
+                    if (fs is not null)
+                    {
+                        financialSnapshots[holding.Ticker] = fs;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to fetch financial data for {Ticker}", holding.Ticker);
+                }
+            }
+        }
+
+        if (snapshots.Count == 0 && newsItems.Count == 0 && insiderTrades.Count == 0 && financialSnapshots.Count == 0)
         {
             return topic;
         }
@@ -145,6 +194,11 @@ public class FinancePromptEnricher : IFinancePromptEnricher
         {
             prefix.AppendLine();
             prefix.AppendLine(BuildInsiderSection(insiderTrades));
+        }
+        if (financialSnapshots.Count > 0)
+        {
+            prefix.AppendLine();
+            prefix.AppendLine(BuildFinancialSection(financialSnapshots));
         }
 
         return new Topic
@@ -356,6 +410,14 @@ public class FinancePromptEnricher : IFinancePromptEnricher
             => Task.FromResult<IReadOnlyList<InsiderTrade>>([]);
     }
 
+    private sealed class EmptyFinancialDataService : IFinancialDataService
+    {
+        public Task<FinancialSnapshot?> GetFinancialSnapshotAsync(
+            string yahooSymbol,
+            CancellationToken cancellationToken = default)
+            => Task.FromResult<FinancialSnapshot?>(null);
+    }
+
     private static bool IsDirectStock(string assetType) =>
         string.Equals(assetType, "Stock", StringComparison.OrdinalIgnoreCase);
 
@@ -406,5 +468,101 @@ public class FinancePromptEnricher : IFinancePromptEnricher
         }
 
         return sb.ToString().TrimEnd();
+    }
+
+    private static string BuildFinancialSection(
+        IReadOnlyDictionary<string, FinancialSnapshot> snapshotsByTicker)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("## Financial Fundamentals");
+        sb.AppendLine($"Retrieved: {DateTimeOffset.UtcNow:O}");
+        sb.AppendLine("Source: Yahoo Finance quoteSummary API (live data).");
+        sb.AppendLine();
+
+        foreach (var (ticker, fs) in snapshotsByTicker)
+        {
+            sb.AppendLine($"### {ticker}");
+
+            if (fs.MarketCap.HasValue)
+            {
+                sb.AppendLine($"- **Enterprise Value / Market Cap**: {FormatLargeNumber(fs.MarketCap.Value)}");
+            }
+            if (fs.TrailingPE.HasValue)
+            {
+                sb.AppendLine($"- **Trailing P/E**: {fs.TrailingPE.Value:0.##}x");
+            }
+            if (fs.ForwardPE.HasValue)
+            {
+                sb.AppendLine($"- **Forward P/E**: {fs.ForwardPE.Value:0.##}x");
+            }
+            if (fs.TrailingEps.HasValue)
+            {
+                sb.AppendLine($"- **Trailing EPS**: ${fs.TrailingEps.Value:0.##}");
+            }
+            if (fs.ForwardEps.HasValue)
+            {
+                sb.AppendLine($"- **Forward EPS**: ${fs.ForwardEps.Value:0.##}");
+            }
+            if (fs.RevenueTTM.HasValue)
+            {
+                sb.AppendLine($"- **Revenue (TTM)**: {FormatLargeNumber(fs.RevenueTTM.Value)}");
+            }
+            if (fs.RevenueGrowthYoY.HasValue)
+            {
+                sb.AppendLine($"- **Revenue Growth YoY**: {fs.RevenueGrowthYoY.Value:P1}");
+            }
+            if (fs.GrossMargins.HasValue)
+            {
+                sb.AppendLine($"- **Gross Margin**: {fs.GrossMargins.Value:P1}");
+            }
+            if (fs.OperatingMargins.HasValue)
+            {
+                sb.AppendLine($"- **Operating Margin**: {fs.OperatingMargins.Value:P1}");
+            }
+            if (fs.ProfitMargins.HasValue)
+            {
+                sb.AppendLine($"- **Net Profit Margin**: {fs.ProfitMargins.Value:P1}");
+            }
+            if (fs.FreeCashflow.HasValue)
+            {
+                sb.AppendLine($"- **Free Cash Flow**: {FormatLargeNumber(fs.FreeCashflow.Value)}");
+            }
+            if (fs.TotalCash.HasValue)
+            {
+                sb.AppendLine($"- **Total Cash**: {FormatLargeNumber(fs.TotalCash.Value)}");
+            }
+            if (fs.TotalDebt.HasValue)
+            {
+                sb.AppendLine($"- **Total Debt**: {FormatLargeNumber(fs.TotalDebt.Value)}");
+            }
+
+            if (fs.AnnualHistory.Count > 0)
+            {
+                sb.AppendLine("- **Annual Revenue / Net Income**:");
+                foreach (var year in fs.AnnualHistory)
+                {
+                    var rev = year.Revenue.HasValue ? FormatLargeNumber(year.Revenue.Value) : "n/a";
+                    var ni  = year.NetIncome.HasValue ? FormatLargeNumber(year.NetIncome.Value) : "n/a";
+                    sb.AppendLine($"  - {year.Year}: Revenue {rev}, Net Income {ni}");
+                }
+            }
+
+            sb.AppendLine();
+        }
+
+        return sb.ToString().TrimEnd();
+    }
+
+    private static string FormatLargeNumber(decimal value)
+    {
+        var abs = Math.Abs(value);
+        var sign = value < 0 ? "-" : string.Empty;
+        return abs switch
+        {
+            >= 1_000_000_000_000m => $"{sign}${abs / 1_000_000_000_000m:0.##}T",
+            >= 1_000_000_000m    => $"{sign}${abs / 1_000_000_000m:0.##}B",
+            >= 1_000_000m        => $"{sign}${abs / 1_000_000m:0.##}M",
+            _                    => $"{sign}${abs:N0}",
+        };
     }
 }

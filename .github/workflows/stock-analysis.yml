@@ -52,6 +52,7 @@ jobs:
           CopilotDigest__Copilot__MaxTokens: ${{ vars.COPILOT_MAX_TOKENS || '4000' }}
           # Insider data disabled for portfolio pipeline (avoids ~70 SEC EDGAR requests)
           CopilotDigest__InsiderData__Enabled: "false"
+          CopilotDigest__FinancialData__Enabled: "false"
           # Email / SMTP notification settings
           CopilotDigest__Email__SmtpHost: ${{ secrets.SMTP_HOST }}
           CopilotDigest__Email__SmtpPort: ${{ vars.SMTP_PORT || '587' }}

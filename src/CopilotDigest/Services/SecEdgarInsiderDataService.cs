@@ -1,6 +1,5 @@
 using System.Globalization;
 using System.Text.Json;
-using System.Text.RegularExpressions;
 using System.Xml.Linq;
 using Microsoft.Extensions.Options;
 using CopilotDigest.Models;
@@ -10,15 +9,18 @@ namespace CopilotDigest.Services;
 /// <summary>
 /// Retrieves insider trades from SEC EDGAR Form 4 filings.
 /// Uses three free, unauthenticated EDGAR endpoints:
-///   1. /cgi-bin/browse-edgar  – resolves ticker → CIK (Atom feed)
-///   2. data.sec.gov/submissions – lists recent Form 4 accession numbers
-///   3. /Archives/edgar/data   – downloads individual Form 4 XML documents
+///   1. /files/company_tickers.json – resolves ticker → CIK (cached)
+///   2. data.sec.gov/submissions    – lists recent Form 4 accession numbers
+///   3. /Archives/edgar/data        – downloads individual Form 4 XML documents
 /// </summary>
-public sealed partial class SecEdgarInsiderDataService : IInsiderDataService
+public sealed class SecEdgarInsiderDataService : IInsiderDataService
 {
-    private const string BrowseBaseUrl      = "https://www.sec.gov/cgi-bin/browse-edgar";
+    private const string CompanyTickersUrl  = "https://www.sec.gov/files/company_tickers.json";
     private const string SubmissionsBaseUrl = "https://data.sec.gov/submissions";
     private const string ArchiveBaseUrl     = "https://www.sec.gov/Archives/edgar/data";
+
+    // Lazily populated once per process; maps upper-case ticker → CIK string.
+    private Dictionary<string, string>? _tickerToCik;
 
     private readonly HttpClient                          _http;
     private readonly InsiderDataSettings                 _settings;
@@ -97,19 +99,56 @@ public sealed partial class SecEdgarInsiderDataService : IInsiderDataService
 
     private async Task<string?> ResolveCikAsync(string ticker, CancellationToken ct)
     {
-        var url = $"{BrowseBaseUrl}?action=getcompany" +
-                  $"&CIK={Uri.EscapeDataString(ticker)}" +
-                  "&type=4&dateb=&owner=include&count=1&output=atom";
+        // Lazy-load the full ticker→CIK map from EDGAR on first call.
+        if (_tickerToCik is null)
+        {
+            _tickerToCik = await LoadTickerMapAsync(ct) ?? [];
+        }
 
-        using var response = await _http.GetAsync(url, ct);
+        return _tickerToCik.TryGetValue(ticker.ToUpperInvariant(), out var cik) ? cik : null;
+    }
+
+    private async Task<Dictionary<string, string>?> LoadTickerMapAsync(CancellationToken ct)
+    {
+        // company_tickers.json: { "0": { "cik_str": 1045810, "ticker": "NVDA", "title": "..." }, ... }
+        using var response = await _http.GetAsync(CompanyTickersUrl, ct);
         if (!response.IsSuccessStatusCode)
         {
+            _logger.LogWarning("EDGAR: could not load company_tickers.json ({Status})", (int)response.StatusCode);
             return null;
         }
 
-        var body = await response.Content.ReadAsStringAsync(ct);
-        var match = CikInUrlPattern().Match(body);
-        return match.Success ? match.Groups[1].Value : null;
+        await using var stream = await response.Content.ReadAsStreamAsync(ct);
+        using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: ct);
+
+        var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var entry in doc.RootElement.EnumerateObject())
+        {
+            if (!entry.Value.TryGetProperty("ticker", out var tickerProp) ||
+                !entry.Value.TryGetProperty("cik_str", out var cikProp))
+            {
+                continue;
+            }
+
+            var t = tickerProp.GetString();
+            if (string.IsNullOrWhiteSpace(t))
+            {
+                continue;
+            }
+
+            // cik_str is a JSON number — convert to a plain integer string.
+            var cikStr = cikProp.ValueKind == JsonValueKind.Number
+                ? cikProp.GetInt64().ToString(CultureInfo.InvariantCulture)
+                : cikProp.GetString() ?? string.Empty;
+
+            if (!string.IsNullOrWhiteSpace(cikStr))
+            {
+                map[t.ToUpperInvariant()] = cikStr;
+            }
+        }
+
+        _logger.LogDebug("EDGAR: loaded {Count} ticker→CIK mappings", map.Count);
+        return map;
     }
 
     // ── Step 2: List recent Form 4 accession numbers ─────────────────────────
@@ -259,10 +298,6 @@ public sealed partial class SecEdgarInsiderDataService : IInsiderDataService
               .FirstOrDefault()
               ?.Value
               .Trim();
-
-    /// <summary>Matches /edgar/data/{cik}/ in EDGAR Atom feed responses.</summary>
-    [GeneratedRegex(@"/edgar/data/(\d+)/")]
-    private static partial Regex CikInUrlPattern();
 
     private sealed record Form4Filing(string AccessionNumber, string PrimaryDocument);
 }

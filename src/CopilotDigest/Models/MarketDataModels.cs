@@ -104,3 +104,37 @@ public class InsiderDataSettings
     /// </summary>
     public string ContactEmail { get; set; } = "contact@example.com";
 }
+
+public class FinancialDataSettings
+{
+    public bool Enabled { get; set; } = true;
+
+    /// <summary>
+    /// Only fetch fundamentals when the topic has this many holdings or fewer.
+    /// Guards the portfolio pipeline (29 holdings) from making unnecessary calls.
+    /// </summary>
+    public int MaxHoldingsForEnrichment { get; set; } = 3;
+
+    public string QuoteSummaryUrl { get; set; } = "https://query1.finance.yahoo.com/v10/finance/quoteSummary/";
+}
+
+public record AnnualFinancials(int Year, decimal? Revenue, decimal? NetIncome);
+
+public class FinancialSnapshot
+{
+    public string Ticker { get; init; } = string.Empty;
+    public decimal? MarketCap { get; init; }
+    public decimal? TrailingPE { get; init; }
+    public decimal? ForwardPE { get; init; }
+    public decimal? TrailingEps { get; init; }
+    public decimal? ForwardEps { get; init; }
+    public decimal? RevenueTTM { get; init; }
+    public decimal? RevenueGrowthYoY { get; init; }
+    public decimal? GrossMargins { get; init; }
+    public decimal? OperatingMargins { get; init; }
+    public decimal? ProfitMargins { get; init; }
+    public decimal? FreeCashflow { get; init; }
+    public decimal? TotalCash { get; init; }
+    public decimal? TotalDebt { get; init; }
+    public IReadOnlyList<AnnualFinancials> AnnualHistory { get; init; } = [];
+}
