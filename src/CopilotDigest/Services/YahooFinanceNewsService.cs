@@ -105,6 +105,29 @@ public partial class YahooFinanceNewsService : IMarketNewsService
         return [.. allItems.OrderByDescending(i => i.PublishedAt ?? DateTimeOffset.MinValue)];
     }
 
+    public async Task<IReadOnlyList<NewsItem>> GetStockNewsAsync(
+        string yahooSymbol,
+        int maxItems,
+        CancellationToken cancellationToken = default)
+    {
+        if (!_settings.Enabled || string.IsNullOrWhiteSpace(yahooSymbol))
+        {
+            return [];
+        }
+
+        var url = $"https://feeds.finance.yahoo.com/rss/2.0/headline?s={Uri.EscapeDataString(yahooSymbol)}&region=US&lang=en-US";
+
+        try
+        {
+            return await FetchFeedAsync(url, maxItems, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to fetch stock news for {Symbol}", yahooSymbol);
+            return [];
+        }
+    }
+
     private async Task<List<NewsItem>> FetchFeedAsync(string url, int maxItems, CancellationToken cancellationToken)
     {
         using var response = await _http.GetAsync(url, cancellationToken);

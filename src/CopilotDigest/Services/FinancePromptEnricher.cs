@@ -103,9 +103,41 @@ public class FinancePromptEnricher : IFinancePromptEnricher
             newsItems = [];
         }
 
+        // Fetch company-specific headlines for each direct-stock holding.
+        // This covers arbitrary deep-dive tickers that are not in the hardcoded portfolio RSS list.
+        var stockNews = new Dictionary<string, IReadOnlyList<NewsItem>>(StringComparer.OrdinalIgnoreCase);
+        var snapshotByTicker = snapshots.ToDictionary(s => s.Ticker, StringComparer.OrdinalIgnoreCase);
+
+        foreach (var holding in holdings)
+        {
+            if (!IsDirectStock(holding.Type))
+            {
+                continue;
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var yahooSymbol = snapshotByTicker.TryGetValue(holding.Ticker, out var snapN) &&
+                              !string.IsNullOrWhiteSpace(snapN.ProviderSymbol)
+                ? snapN.ProviderSymbol
+                : holding.Ticker;
+
+            try
+            {
+                var items = await _newsService.GetStockNewsAsync(yahooSymbol, 5, cancellationToken);
+                if (items.Count > 0)
+                {
+                    stockNews[holding.Ticker] = items;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to fetch stock news for {Ticker}", holding.Ticker);
+            }
+        }
+
         // Fetch insider trades for direct stock holdings only (skip ETFs, Crypto, Commodities).
         var insiderTrades = new Dictionary<string, IReadOnlyList<InsiderTrade>>(StringComparer.OrdinalIgnoreCase);
-        var snapshotByTicker = snapshots.ToDictionary(s => s.Ticker, StringComparer.OrdinalIgnoreCase);
 
         foreach (var holding in holdings)
         {
@@ -175,7 +207,7 @@ public class FinancePromptEnricher : IFinancePromptEnricher
             }
         }
 
-        if (snapshots.Count == 0 && newsItems.Count == 0 && insiderTrades.Count == 0 && financialSnapshots.Count == 0)
+        if (snapshots.Count == 0 && newsItems.Count == 0 && stockNews.Count == 0 && insiderTrades.Count == 0 && financialSnapshots.Count == 0)
         {
             return topic;
         }
@@ -189,6 +221,11 @@ public class FinancePromptEnricher : IFinancePromptEnricher
         {
             prefix.AppendLine();
             prefix.AppendLine(BuildNewsSection(newsItems));
+        }
+        if (stockNews.Count > 0)
+        {
+            prefix.AppendLine();
+            prefix.AppendLine(BuildStockNewsSection(stockNews));
         }
         if (insiderTrades.Count > 0)
         {
@@ -386,6 +423,39 @@ public class FinancePromptEnricher : IFinancePromptEnricher
         return builder.ToString().TrimEnd();
     }
 
+    private static string BuildStockNewsSection(IReadOnlyDictionary<string, IReadOnlyList<NewsItem>> newsByTicker)
+    {
+        var builder = new StringBuilder();
+        builder.AppendLine("## Company-Specific Headlines");
+        builder.AppendLine($"Retrieved: {DateTimeOffset.UtcNow:O}");
+        builder.AppendLine("Source: Yahoo Finance RSS (per-stock feeds). These are direct company news — distinct from the macro headlines above.");
+        builder.AppendLine();
+
+        foreach (var (ticker, items) in newsByTicker)
+        {
+            builder.AppendLine($"### {ticker}");
+
+            foreach (var item in items)
+            {
+                var timestamp = item.PublishedAt.HasValue
+                    ? item.PublishedAt.Value.UtcDateTime.ToString("yyyy-MM-dd HH:mm 'UTC'", CultureInfo.InvariantCulture)
+                    : "date unknown";
+
+                builder.Append($"- [{timestamp}] ");
+                builder.AppendLine(item.Title);
+
+                if (!string.IsNullOrWhiteSpace(item.Description))
+                {
+                    builder.AppendLine($"  {item.Description}");
+                }
+            }
+
+            builder.AppendLine();
+        }
+
+        return builder.ToString().TrimEnd();
+    }
+
     private sealed class EmptyMarketDataService : IFreeMarketDataService
     {
         public Task<IReadOnlyList<MarketSnapshot>> GetSnapshotsAsync(
@@ -399,6 +469,10 @@ public class FinancePromptEnricher : IFinancePromptEnricher
     private sealed class EmptyNewsService : IMarketNewsService
     {
         public Task<IReadOnlyList<NewsItem>> GetMacroNewsAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<NewsItem>>([]);
+
+        public Task<IReadOnlyList<NewsItem>> GetStockNewsAsync(
+            string yahooSymbol, int maxItems, CancellationToken cancellationToken = default) =>
             Task.FromResult<IReadOnlyList<NewsItem>>([]);
     }
 
@@ -427,7 +501,7 @@ public class FinancePromptEnricher : IFinancePromptEnricher
         var sb = new StringBuilder();
         sb.AppendLine("## Recent Insider Activity");
         sb.AppendLine($"Retrieved: {DateTimeOffset.UtcNow:O}");
-        sb.AppendLine("Source: SEC EDGAR Form 4 filings (non-derivative transactions only).");
+        sb.AppendLine("Source: SEC EDGAR Form 4 filings (open-market and derivative transactions).");
         sb.AppendLine();
 
         foreach (var (ticker, trades) in tradesByTicker)
@@ -436,12 +510,25 @@ public class FinancePromptEnricher : IFinancePromptEnricher
 
             foreach (var t in trades)
             {
-                var direction = t.AcquiredOrDisposed switch
+                string direction;
+                if (t.Kind == InsiderTransactionKind.Derivative)
                 {
-                    "A" => "BUY",
-                    "D" => "SELL",
-                    _   => t.AcquiredOrDisposed,
-                };
+                    direction = t.AcquiredOrDisposed switch
+                    {
+                        "A" => "RSU VEST / OPTION ACQUIRE",
+                        "D" => "RSU DISPOSE / OPTION EXERCISE",
+                        _   => $"DERIVATIVE ({t.AcquiredOrDisposed})",
+                    };
+                }
+                else
+                {
+                    direction = t.AcquiredOrDisposed switch
+                    {
+                        "A" => "OPEN-MARKET BUY",
+                        "D" => "OPEN-MARKET SELL",
+                        _   => t.AcquiredOrDisposed,
+                    };
+                }
 
                 var date = t.TransactionDate.HasValue
                     ? t.TransactionDate.Value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)
@@ -485,7 +572,7 @@ public class FinancePromptEnricher : IFinancePromptEnricher
 
             if (fs.MarketCap.HasValue)
             {
-                sb.AppendLine($"- **Enterprise Value / Market Cap**: {FormatLargeNumber(fs.MarketCap.Value)}");
+                sb.AppendLine($"- **Market Cap (live)**: {FormatLargeNumber(fs.MarketCap.Value)}");
             }
             if (fs.TrailingPE.HasValue)
             {
@@ -534,6 +621,19 @@ public class FinancePromptEnricher : IFinancePromptEnricher
             if (fs.TotalDebt.HasValue)
             {
                 sb.AppendLine($"- **Total Debt**: {FormatLargeNumber(fs.TotalDebt.Value)}");
+            }
+
+            if (!string.IsNullOrWhiteSpace(fs.AnalystConsensus))
+            {
+                var mean = fs.AnalystMean.HasValue
+                    ? $" (mean {fs.AnalystMean.Value:0.0} / 5.0 — 1.0 = strong buy, 5.0 = sell)"
+                    : string.Empty;
+                sb.AppendLine($"- **Analyst Consensus**: {fs.AnalystConsensus}{mean}");
+            }
+
+            if (fs.NextEarningsDate.HasValue)
+            {
+                sb.AppendLine($"- **Next Earnings Date**: {fs.NextEarningsDate.Value:yyyy-MM-dd} (source: Yahoo Finance)");
             }
 
             if (fs.AnnualHistory.Count > 0)

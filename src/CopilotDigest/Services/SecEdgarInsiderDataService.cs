@@ -233,36 +233,62 @@ public sealed class SecEdgarInsiderDataService : IInsiderDataService
 
         var trades = new List<InsiderTrade>();
 
-        // Only parse non-derivative transactions (direct stock purchases / sales).
-        // Derivative transactions (options/RSUs) are excluded to keep the signal clean.
+        // Non-derivative = open-market purchases / sales of actual shares.
         foreach (var txn in root.Descendants("nonDerivativeTransaction"))
         {
-            var adCode = GetNestedValue(txn, "transactionAcquiredDisposedCode");
-            if (string.IsNullOrWhiteSpace(adCode))
+            var trade = ParseTransaction(txn, ownerName, ownerTitle, InsiderTransactionKind.OpenMarket);
+            if (trade is not null)
             {
-                continue;
+                trades.Add(trade);
             }
+        }
 
-            var sharesStr = GetNestedValue(txn, "transactionShares");
-            var priceStr  = GetNestedValue(txn, "transactionPricePerShare");
-            var dateStr   = GetNestedValue(txn, "transactionDate");
-
-            decimal? shares = decimal.TryParse(sharesStr, NumberStyles.Number, CultureInfo.InvariantCulture, out var s) ? s : null;
-            decimal? price  = decimal.TryParse(priceStr,  NumberStyles.Number, CultureInfo.InvariantCulture, out var p) ? p : null;
-            DateOnly? date  = DateOnly.TryParse(dateStr, out var d) ? d : null;
-
-            trades.Add(new InsiderTrade
+        // Derivative = RSU vestings, option exercises, etc.
+        // These represent the bulk of Form 4 activity for large-cap executives and are important
+        // context: a consistent pattern of disposals after vesting is very different from
+        // discretionary open-market selling.
+        foreach (var txn in root.Descendants("derivativeTransaction"))
+        {
+            var trade = ParseTransaction(txn, ownerName, ownerTitle, InsiderTransactionKind.Derivative);
+            if (trade is not null)
             {
-                InsiderName        = ownerName,
-                InsiderTitle       = ownerTitle,
-                AcquiredOrDisposed = adCode,
-                Shares             = shares,
-                PricePerShare      = price,
-                TransactionDate    = date,
-            });
+                trades.Add(trade);
+            }
         }
 
         return trades;
+    }
+
+    private static InsiderTrade? ParseTransaction(
+        XElement txn,
+        string ownerName,
+        string ownerTitle,
+        InsiderTransactionKind kind)
+    {
+        var adCode = GetNestedValue(txn, "transactionAcquiredDisposedCode");
+        if (string.IsNullOrWhiteSpace(adCode))
+        {
+            return null;
+        }
+
+        var sharesStr = GetNestedValue(txn, "transactionShares");
+        var priceStr  = GetNestedValue(txn, "transactionPricePerShare");
+        var dateStr   = GetNestedValue(txn, "transactionDate");
+
+        decimal? shares = decimal.TryParse(sharesStr, NumberStyles.Number, CultureInfo.InvariantCulture, out var s) ? s : null;
+        decimal? price  = decimal.TryParse(priceStr,  NumberStyles.Number, CultureInfo.InvariantCulture, out var p) ? p : null;
+        DateOnly? date  = DateOnly.TryParse(dateStr, out var d) ? d : null;
+
+        return new InsiderTrade
+        {
+            InsiderName        = ownerName,
+            InsiderTitle       = ownerTitle,
+            AcquiredOrDisposed = adCode,
+            Kind               = kind,
+            Shares             = shares,
+            PricePerShare      = price,
+            TransactionDate    = date,
+        };
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────

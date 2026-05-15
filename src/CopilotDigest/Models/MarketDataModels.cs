@@ -83,12 +83,21 @@ public class MarketSnapshot
     public string? Note { get; init; }
 }
 
+public enum InsiderTransactionKind
+{
+    /// <summary>Open-market purchase or sale of actual shares.</summary>
+    OpenMarket,
+    /// <summary>Derivative transaction: RSU vesting, option exercise, etc.</summary>
+    Derivative,
+}
+
 public class InsiderTrade
 {
     public string InsiderName { get; init; } = string.Empty;
     public string InsiderTitle { get; init; } = string.Empty;
-    /// <summary>"A" = Acquired (buy), "D" = Disposed (sell).</summary>
+    /// <summary>"A" = Acquired (buy/vest), "D" = Disposed (sell/exercise).</summary>
     public string AcquiredOrDisposed { get; init; } = string.Empty;
+    public InsiderTransactionKind Kind { get; init; } = InsiderTransactionKind.OpenMarket;
     public decimal? Shares { get; init; }
     public decimal? PricePerShare { get; init; }
     public DateOnly? TransactionDate { get; init; }
@@ -123,6 +132,7 @@ public record AnnualFinancials(int Year, decimal? Revenue, decimal? NetIncome);
 public class FinancialSnapshot
 {
     public string Ticker { get; init; } = string.Empty;
+    /// <summary>True market capitalisation from summaryDetail (not enterprise value).</summary>
     public decimal? MarketCap { get; init; }
     public decimal? TrailingPE { get; init; }
     public decimal? ForwardPE { get; init; }
@@ -136,5 +146,11 @@ public class FinancialSnapshot
     public decimal? FreeCashflow { get; init; }
     public decimal? TotalCash { get; init; }
     public decimal? TotalDebt { get; init; }
+    /// <summary>Analyst consensus string, e.g. "buy", "hold", "sell" (from financialData).</summary>
+    public string? AnalystConsensus { get; init; }
+    /// <summary>Mean analyst recommendation on a 1.0 (strong buy) – 5.0 (sell) scale.</summary>
+    public decimal? AnalystMean { get; init; }
+    /// <summary>Next confirmed earnings date from Yahoo Finance calendarEvents.</summary>
+    public DateOnly? NextEarningsDate { get; init; }
     public IReadOnlyList<AnnualFinancials> AnnualHistory { get; init; } = [];
 }

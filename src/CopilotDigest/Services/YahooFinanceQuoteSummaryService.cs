@@ -49,7 +49,7 @@ public sealed class YahooFinanceQuoteSummaryService : IFinancialDataService
         {
             var baseUrl = _settings.QuoteSummaryUrl.TrimEnd('/');
             var url = $"{baseUrl}/{Uri.EscapeDataString(yahooSymbol)}" +
-                      "?modules=financialData%2CdefaultKeyStatistics%2CincomeStatementHistory" +
+                      "?modules=financialData%2CdefaultKeyStatistics%2CincomeStatementHistory%2CsummaryDetail%2CcalendarEvents" +
                       "&corsDomain=finance.yahoo.com";
 
             using var response = await _http.GetAsync(url, cancellationToken);
@@ -74,17 +74,22 @@ public sealed class YahooFinanceQuoteSummaryService : IFinancialDataService
 
             var result = results[0];
 
-            result.TryGetProperty("financialData",        out var fd);
-            result.TryGetProperty("defaultKeyStatistics", out var dks);
+            result.TryGetProperty("financialData",          out var fd);
+            result.TryGetProperty("defaultKeyStatistics",   out var dks);
             result.TryGetProperty("incomeStatementHistory", out var ish);
+            result.TryGetProperty("summaryDetail",          out var sd);
+            result.TryGetProperty("calendarEvents",         out var ce);
 
             return new FinancialSnapshot
             {
                 Ticker            = yahooSymbol,
-                MarketCap         = TryGetRaw(dks, "enterpriseValue")        // use enterprise value as proxy
+                // summaryDetail.marketCap is the true market cap; enterpriseValue is a different metric.
+                MarketCap         = TryGetRaw(sd,  "marketCap")
                                     ?? TryGetRaw(dks, "marketCap"),
-                TrailingPE        = TryGetRaw(dks, "trailingPE"),
-                ForwardPE         = TryGetRaw(dks, "forwardPE"),
+                TrailingPE        = TryGetRaw(sd,  "trailingPE")
+                                    ?? TryGetRaw(dks, "trailingPE"),
+                ForwardPE         = TryGetRaw(sd,  "forwardPE")
+                                    ?? TryGetRaw(dks, "forwardPE"),
                 TrailingEps       = TryGetRaw(dks, "trailingEps"),
                 ForwardEps        = TryGetRaw(dks, "forwardEps"),
                 RevenueTTM        = TryGetRaw(fd,  "totalRevenue"),
@@ -95,6 +100,9 @@ public sealed class YahooFinanceQuoteSummaryService : IFinancialDataService
                 FreeCashflow      = TryGetRaw(fd,  "freeCashflow"),
                 TotalCash         = TryGetRaw(fd,  "totalCash"),
                 TotalDebt         = TryGetRaw(fd,  "totalDebt"),
+                AnalystConsensus  = TryGetString(fd, "recommendationKey"),
+                AnalystMean       = TryGetRaw(fd,  "recommendationMean"),
+                NextEarningsDate  = ParseNextEarningsDate(ce),
                 AnnualHistory     = ParseAnnualHistory(ish),
             };
         }
@@ -172,6 +180,59 @@ public sealed class YahooFinanceQuoteSummaryService : IFinancialDataService
             raw.ValueKind == JsonValueKind.Number)
         {
             return raw.TryGetDecimal(out var wrapped) ? wrapped : null;
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Reads the string value of a named field.
+    /// Handles both plain strings and Yahoo's { "raw": "...", "fmt": "..." } wrappers.
+    /// </summary>
+    private static string? TryGetString(JsonElement parent, string fieldName)
+    {
+        if (parent.ValueKind != JsonValueKind.Object ||
+            !parent.TryGetProperty(fieldName, out var field))
+        {
+            return null;
+        }
+
+        if (field.ValueKind == JsonValueKind.String)
+        {
+            return field.GetString();
+        }
+
+        if (field.ValueKind == JsonValueKind.Object &&
+            field.TryGetProperty("raw", out var raw) &&
+            raw.ValueKind == JsonValueKind.String)
+        {
+            return raw.GetString();
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Extracts the first upcoming earnings date from calendarEvents.
+    /// Schema: { "calendarEvents": { "earnings": { "earningsDate": [ { "raw": 1753660800 } ] } } }
+    /// </summary>
+    private static DateOnly? ParseNextEarningsDate(JsonElement ce)
+    {
+        if (ce.ValueKind != JsonValueKind.Object ||
+            !ce.TryGetProperty("earnings", out var earnings) ||
+            !earnings.TryGetProperty("earningsDate", out var dates) ||
+            dates.ValueKind != JsonValueKind.Array ||
+            dates.GetArrayLength() == 0)
+        {
+            return null;
+        }
+
+        var first = dates[0];
+        if (first.TryGetProperty("raw", out var raw) &&
+            raw.ValueKind == JsonValueKind.Number &&
+            raw.TryGetInt64(out var ts))
+        {
+            return DateOnly.FromDateTime(DateTimeOffset.FromUnixTimeSeconds(ts).UtcDateTime);
         }
 
         return null;
