@@ -35,6 +35,25 @@ public class ResearchService : IResearchService
         {
             _logger.LogInformation("Requesting summary for topic: {Topic}", topic.Name);
             var enrichedTopic = await _financePromptEnricher.EnrichTopicAsync(topic, cancellationToken);
+
+            if (enrichedTopic.FinancialDataMissing)
+            {
+                _logger.LogError(
+                    "Financial data was expected for topic '{Topic}' but Alpha Vantage returned nothing. " +
+                    "Check that the API key is configured and the rate limit has not been exceeded.",
+                    topic.Name);
+
+                return new SummaryResult
+                {
+                    TopicName    = topic.Name,
+                    GeneratedAt  = DateTime.UtcNow,
+                    IsSuccess    = false,
+                    ErrorMessage = "Alpha Vantage returned no financial data. " +
+                                   "The report would be based entirely on the model's training data and is therefore unreliable. " +
+                                   "Verify that ALPHA_VANTAGE_KEY is set and the free-tier rate limit (25 req/day) has not been exceeded.",
+                };
+            }
+
             var summary = await _copilotService.SummariseTopicAsync(enrichedTopic, cancellationToken);
 
             return new SummaryResult

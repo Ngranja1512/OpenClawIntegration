@@ -175,8 +175,11 @@ public class FinancePromptEnricher : IFinancePromptEnricher
         // Fetch financial fundamentals — only when the topic is a focused single-stock deep-dive
         // (holdings.Count <= MaxHoldingsForEnrichment) to avoid calling Yahoo for 29-stock portfolios.
         var financialSnapshots = new Dictionary<string, FinancialSnapshot>(StringComparer.OrdinalIgnoreCase);
+        var directStockCount   = holdings.Count(h => IsDirectStock(h.Type));
+        var financialDataExpected = _financialDataService is not EmptyFinancialDataService
+                                    && directStockCount > 0;
 
-        if (_financialDataService is not EmptyFinancialDataService)
+        if (financialDataExpected)
         {
             foreach (var holding in holdings)
             {
@@ -240,9 +243,10 @@ public class FinancePromptEnricher : IFinancePromptEnricher
 
         return new Topic
         {
-            Name = topic.Name,
-            Description = topic.Description,
-            Prompt = $"{prefix.ToString().TrimEnd()}\n\n{topic.Prompt}",
+            Name                 = topic.Name,
+            Description          = topic.Description,
+            Prompt               = $"{prefix.ToString().TrimEnd()}\n\n{topic.Prompt}",
+            FinancialDataMissing = financialDataExpected && financialSnapshots.Count == 0,
         };
     }
 

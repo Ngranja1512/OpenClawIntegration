@@ -77,16 +77,18 @@ public sealed class AlphaVantageFinancialDataService : IFinancialDataService
 
         try
         {
-            // Run the three fetches concurrently — they are independent.
+            // Run the four fetches concurrently — they are independent.
             var overviewTask         = FetchJsonAsync($"function=OVERVIEW&symbol={Uri.EscapeDataString(symbol)}", cancellationToken);
             var incomeStatementTask  = FetchJsonAsync($"function=INCOME_STATEMENT&symbol={Uri.EscapeDataString(symbol)}", cancellationToken);
             var cashFlowTask         = FetchJsonAsync($"function=CASH_FLOW&symbol={Uri.EscapeDataString(symbol)}", cancellationToken);
+            var balanceSheetTask     = FetchJsonAsync($"function=BALANCE_SHEET&symbol={Uri.EscapeDataString(symbol)}", cancellationToken);
 
-            await Task.WhenAll(overviewTask, incomeStatementTask, cashFlowTask);
+            await Task.WhenAll(overviewTask, incomeStatementTask, cashFlowTask, balanceSheetTask);
 
             using var overview        = await overviewTask;
             using var incomeStatement = await incomeStatementTask;
             using var cashFlow        = await cashFlowTask;
+            using var balanceSheet    = await balanceSheetTask;
 
             if (overview is null)
             {
@@ -124,8 +126,11 @@ public sealed class AlphaVantageFinancialDataService : IFinancialDataService
             // INCOME_STATEMENT → annual history
             var annualHistory = ParseAnnualHistory(incomeStatement);
 
-            // CASH_FLOW → FCF, total cash
-            var (freeCashflow, totalCash) = ParseCashFlow(cashFlow);
+            // CASH_FLOW → FCF (TTM from last 4 quarters)
+            var freeCashflow = ParseCashFlow(cashFlow, symbol, _logger);
+
+            // BALANCE_SHEET → total cash and total debt (most recent quarter)
+            var (totalCash, totalDebt) = ParseBalanceSheet(balanceSheet);
 
             return new FinancialSnapshot
             {
@@ -142,7 +147,7 @@ public sealed class AlphaVantageFinancialDataService : IFinancialDataService
                 ProfitMargins    = profitMargins,
                 FreeCashflow     = freeCashflow,
                 TotalCash        = totalCash,
-                TotalDebt        = null,            // AV OVERVIEW does not expose total debt
+                TotalDebt        = totalDebt,
                 AnalystConsensus = analystConsensus,
                 AnalystMean      = analystMean,
                 NextEarningsDate = null,            // requires separate AV endpoint; omitted
@@ -290,11 +295,12 @@ public sealed class AlphaVantageFinancialDataService : IFinancialDataService
     /// Falls back to the most recent annual report if quarterly data is insufficient.
     /// FCF per quarter = operatingCashflow − |capitalExpenditures| (when freeCashFlow is "None").
     /// </summary>
-    private static (decimal? freeCashflow, decimal? totalCash) ParseCashFlow(JsonDocument? doc)
+    private static decimal? ParseCashFlow(JsonDocument? doc, string symbol, ILogger logger)
     {
         if (doc is null)
         {
-            return (null, null);
+            logger.LogWarning("Alpha Vantage CASH_FLOW returned no data for {Symbol} — FCF will be absent", symbol);
+            return null;
         }
 
         var root = doc.RootElement;
@@ -304,8 +310,8 @@ public sealed class AlphaVantageFinancialDataService : IFinancialDataService
             quarters.ValueKind == JsonValueKind.Array &&
             quarters.GetArrayLength() >= 4)
         {
-            decimal ttmFcf = 0;
-            bool anyValid  = false;
+            decimal ttmFcf    = 0;
+            int validQuarters = 0;
 
             foreach (var q in quarters.EnumerateArray().Take(4))
             {
@@ -322,14 +328,23 @@ public sealed class AlphaVantageFinancialDataService : IFinancialDataService
 
                 if (fcfQ.HasValue)
                 {
-                    ttmFcf  += fcfQ.Value;
-                    anyValid = true;
+                    ttmFcf += fcfQ.Value;
+                    validQuarters++;
                 }
             }
 
-            if (anyValid)
+            if (validQuarters == 4)
             {
-                return (ttmFcf, null);
+                return ttmFcf;
+            }
+
+            if (validQuarters > 0)
+            {
+                // Scale partial quarters to a TTM estimate rather than return null.
+                logger.LogWarning(
+                    "Alpha Vantage CASH_FLOW: only {N}/4 quarters had FCF data for {Symbol} — scaling to TTM estimate",
+                    validQuarters, symbol);
+                return ttmFcf / validQuarters * 4;
             }
         }
 
@@ -347,13 +362,65 @@ public sealed class AlphaVantageFinancialDataService : IFinancialDataService
                 if (ocf.HasValue && capex.HasValue)
                 {
                     fcf = ocf.Value - Math.Abs(capex.Value);
+                    logger.LogDebug("Alpha Vantage FCF for {Symbol}: computed from annual OCF - Capex", symbol);
                 }
             }
 
-            return (fcf, null);
+            if (fcf is not null)
+            {
+                return fcf;
+            }
         }
 
-        return (null, null);
+        logger.LogWarning("Alpha Vantage CASH_FLOW: could not compute FCF for {Symbol} — all relevant fields were None", symbol);
+        return null;
+    }
+
+    /// <summary>
+    /// Reads the most recent quarterly (or annual) balance sheet to get total cash and total debt.
+    /// Cash = cashAndShortTermInvestments (preferred) or cashAndCashEquivalentsAtCarryingValue.
+    /// Debt = shortLongTermDebtTotal.
+    /// </summary>
+    private static (decimal? totalCash, decimal? totalDebt) ParseBalanceSheet(JsonDocument? doc)
+    {
+        if (doc is null)
+        {
+            return (null, null);
+        }
+
+        var root = doc.RootElement;
+
+        JsonElement report = default;
+        bool found = false;
+
+        if (root.TryGetProperty("quarterlyReports", out var quarters) &&
+            quarters.ValueKind == JsonValueKind.Array &&
+            quarters.GetArrayLength() > 0)
+        {
+            report = quarters[0];
+            found  = true;
+        }
+        else if (root.TryGetProperty("annualReports", out var annuals) &&
+                 annuals.ValueKind == JsonValueKind.Array &&
+                 annuals.GetArrayLength() > 0)
+        {
+            report = annuals[0];
+            found  = true;
+        }
+
+        if (!found)
+        {
+            return (null, null);
+        }
+
+        // Cash: prefer broader measure (cash + short-term investments), fall back to cash only.
+        var totalCash = ParseAvDecimal(report, "cashAndShortTermInvestments")
+                     ?? ParseAvDecimal(report, "cashAndCashEquivalentsAtCarryingValue");
+
+        // Debt: sum of short-term + long-term debt obligations.
+        var totalDebt = ParseAvDecimal(report, "shortLongTermDebtTotal");
+
+        return (totalCash, totalDebt);
     }
 
     /// <summary>
