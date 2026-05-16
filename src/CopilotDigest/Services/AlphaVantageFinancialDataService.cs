@@ -98,12 +98,36 @@ public sealed class AlphaVantageFinancialDataService : IFinancialDataService
 
             var root = overview.RootElement;
 
-            // AV returns { "Information": "..." } when rate-limited or key is invalid.
+            // AV returns { "Information": "..." } when the API key is invalid or the free-tier
+            // premium endpoint is accessed without a paid key.
             if (root.TryGetProperty("Information", out var info))
             {
                 _logger.LogError(
-                    "Alpha Vantage API returned an informational message for {Symbol}: {Message}",
+                    "Alpha Vantage API key error for {Symbol}: {Message}",
                     symbol, info.GetString());
+                return null;
+            }
+
+            // AV returns { "Note": "..." } when the per-minute or per-day rate limit is hit.
+            if (root.TryGetProperty("Note", out var note))
+            {
+                _logger.LogError(
+                    "Alpha Vantage rate limit reached for {Symbol}: {Message}. " +
+                    "Free tier allows 25 requests/day and 5/minute.",
+                    symbol, note.GetString());
+                return null;
+            }
+
+            // AV returns an empty object (all fields empty strings) for unknown symbols.
+            // The "Symbol" field is empty when the ticker is not recognised.
+            var symbolInResponse = ParseAvString(root, "Symbol");
+            if (string.IsNullOrWhiteSpace(symbolInResponse))
+            {
+                _logger.LogError(
+                    "Alpha Vantage did not recognise ticker '{Symbol}'. " +
+                    "Make sure you are using the correct exchange ticker (e.g. 'AMZN' for Amazon, 'GOOGL' for Alphabet). " +
+                    "You can look up the exact symbol at https://finance.yahoo.com or https://www.alphavantage.co/",
+                    symbol);
                 return null;
             }
 
