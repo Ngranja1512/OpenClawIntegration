@@ -563,7 +563,7 @@ public class FinancePromptEnricher : IFinancePromptEnricher
         var sb = new StringBuilder();
         sb.AppendLine("## Financial Fundamentals");
         sb.AppendLine($"Retrieved: {DateTimeOffset.UtcNow:O}");
-        sb.AppendLine("Source: Yahoo Finance quoteSummary API (live data).");
+        sb.AppendLine("Source: Alpha Vantage API (live data).");
         sb.AppendLine();
 
         foreach (var (ticker, fs) in snapshotsByTicker)

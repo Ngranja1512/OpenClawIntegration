@@ -38,6 +38,15 @@ public sealed class AlphaVantageFinancialDataService : IFinancialDataService
         {
             _http.DefaultRequestHeaders.UserAgent.ParseAdd("CopilotDigest/1.0");
         }
+
+        if (_financialSettings.Enabled && string.IsNullOrWhiteSpace(_settings.ApiKey))
+        {
+            _logger.LogError(
+                "FinancialData is enabled but CopilotDigest:AlphaVantage:ApiKey is not configured. " +
+                "Financial Fundamentals will be absent from all reports. " +
+                "In GitHub Actions: add ALPHA_VANTAGE_KEY as a repository secret. " +
+                "Locally: add ApiKey to appsettings.Local.json.");
+        }
     }
 
     // ── Public API ───────────────────────────────────────────────────────────
@@ -133,7 +142,7 @@ public sealed class AlphaVantageFinancialDataService : IFinancialDataService
                 ProfitMargins    = profitMargins,
                 FreeCashflow     = freeCashflow,
                 TotalCash        = totalCash,
-                TotalDebt        = ParseAvDecimal(root, "BookValue"),  // not exact but best proxy available
+                TotalDebt        = null,            // AV OVERVIEW does not expose total debt
                 AnalystConsensus = analystConsensus,
                 AnalystMean      = analystMean,
                 NextEarningsDate = null,            // requires separate AV endpoint; omitted
